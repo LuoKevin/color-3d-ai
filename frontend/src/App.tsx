@@ -1,6 +1,6 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Canvas } from "@react-three/fiber";
-import { Bounds, OrbitControls } from "@react-three/drei";
+import { Bounds, OrbitControls, TransformControls } from "@react-three/drei";
 import * as THREE from "three";
 import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader";
 import { STLLoader } from "three/examples/jsm/loaders/STLLoader";
@@ -33,41 +33,69 @@ function prepareObject(object: THREE.Object3D) {
   return object;
 }
 
-type Rotation = {
-  x: number;
-  y: number;
-  z: number;
-};
-
 function Scene({
   model,
-  rotation
+  showGizmo
 }: {
   model: ModelPayload | null;
-  rotation: [number, number, number];
+  showGizmo: boolean;
 }) {
+  const modelRef = useRef<THREE.Group>(null);
+  const orbitRef = useRef<{ enabled: boolean } | null>(null);
+  const [transformTarget, setTransformTarget] =
+    useState<THREE.Object3D | null>(null);
+
+  useEffect(() => {
+    setTransformTarget(modelRef.current);
+  }, [model]);
+
+  useEffect(() => {
+    if (!showGizmo && orbitRef.current) {
+      orbitRef.current.enabled = true;
+    }
+  }, [showGizmo]);
+
   return (
     <Canvas camera={{ position: [2.5, 2.5, 2.5], fov: 50 }}>
       <color attach="background" args={["#0f1115"]} />
       <ambientLight intensity={0.6} />
       <directionalLight position={[6, 8, 4]} intensity={0.9} />
-      <OrbitControls makeDefault />
+      <OrbitControls
+        ref={orbitRef}
+        makeDefault
+        enableDamping
+        dampingFactor={0.08}
+        enableRotate={!showGizmo}
+      />
       {model ? (
-        <Bounds fit clip observe margin={1.2}>
-          <group rotation={rotation}>
-            {model.kind === "geometry" ? (
-              <mesh geometry={model.geometry}>
-                <meshStandardMaterial
-                  color="#c6c6c6"
-                  roughness={0.65}
-                  metalness={0.1}
-                />
-              </mesh>
-            ) : (
-              <primitive object={model.object} />
-            )}
-          </group>
-        </Bounds>
+        <>
+          <Bounds fit clip observe margin={1.2}>
+            <group ref={modelRef}>
+              {model.kind === "geometry" ? (
+                <mesh geometry={model.geometry}>
+                  <meshStandardMaterial
+                    color="#c6c6c6"
+                    roughness={0.65}
+                    metalness={0.1}
+                  />
+                </mesh>
+              ) : (
+                <primitive object={model.object} />
+              )}
+            </group>
+          </Bounds>
+          {showGizmo && transformTarget ? (
+            <TransformControls
+              mode="rotate"
+              object={transformTarget}
+              onDraggingChanged={(event) => {
+                if (orbitRef.current) {
+                  orbitRef.current.enabled = !event.value;
+                }
+              }}
+            />
+          ) : null}
+        </>
       ) : null}
     </Canvas>
   );
@@ -75,23 +103,10 @@ function Scene({
 
 export default function App() {
   const [model, setModel] = useState<ModelPayload | null>(null);
-  const [rotation, setRotation] = useState<Rotation>({ x: 0, y: 0, z: 0 });
+  const [showGizmo, setShowGizmo] = useState(true);
   const [status, setStatus] = useState<string>(
     "Drop an OBJ or STL here, or use the picker."
   );
-
-  const rotationRadians = useMemo<[number, number, number]>(
-    () => [
-      (rotation.x * Math.PI) / 180,
-      (rotation.y * Math.PI) / 180,
-      (rotation.z * Math.PI) / 180
-    ],
-    [rotation]
-  );
-
-  const updateRotation = useCallback((axis: keyof Rotation, value: number) => {
-    setRotation((current) => ({ ...current, [axis]: value }));
-  }, []);
 
   const handleFile = useCallback(async (file: File) => {
     const extension = file.name.split(".").pop()?.toLowerCase();
@@ -143,7 +158,7 @@ export default function App() {
       <header className="viewer__header">
         <div>
           <h1>Color 3D AI</h1>
-          <p>Basic OBJ/STL viewer with orbit controls.</p>
+          <p>Switch between ring-handle rotation and orbit-only viewing.</p>
         </div>
         <div className="viewer__actions">
           <label className="viewer__input">
@@ -159,37 +174,21 @@ export default function App() {
             />
             Choose file
           </label>
-          <button
-            className="viewer__button"
-            type="button"
-            onClick={() => setRotation({ x: 0, y: 0, z: 0 })}
-          >
-            Reset rotation
-          </button>
+          <label className="viewer__toggle">
+            <span>{showGizmo ? "Ring handles" : "Orbit only"}</span>
+            <input
+              type="checkbox"
+              checked={showGizmo}
+              onChange={(event) => setShowGizmo(event.target.checked)}
+            />
+            <span aria-hidden="true" className="viewer__switch" />
+          </label>
         </div>
       </header>
 
-      <section className="viewer__controls">
-        {(["x", "y", "z"] as const).map((axis) => (
-          <label key={axis} className="viewer__control">
-            <span>{axis.toUpperCase()}</span>
-            <input
-              type="range"
-              min={-180}
-              max={180}
-              value={rotation[axis]}
-              onChange={(event) =>
-                updateRotation(axis, Number(event.target.value))
-              }
-            />
-            <span className="viewer__value">{rotation[axis]}°</span>
-          </label>
-        ))}
-      </section>
-
       <section className="viewer__stage" {...dropHandlers}>
         <div className="viewer__status">{status}</div>
-        <Scene model={model} rotation={rotationRadians} />
+        <Scene model={model} showGizmo={showGizmo} />
       </section>
     </div>
   );
